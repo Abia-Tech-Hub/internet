@@ -10,7 +10,7 @@ const Nav = () => (
       <Link href="">Sports</Link>
       <Link href="">Finance</Link>
       <Link href="">Health & Fitness</Link>
-      <Link href="">Travel</Link>
+      <Link href="">Travel with me</Link>
       <Link href="">Tech</Link>
       <Link href="">Gadgets</Link>
       <Link href="">Tech</Link>
