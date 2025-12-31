@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
 
     // Create hotspot user in MikroTik
     try {
-      const { createHotspotUser } = require("../../../../../mikrotik.js");
+      const { createHotspotUser } = require("../../../../mikrotik.js");
       await createHotspotUser({
         username,
         password,

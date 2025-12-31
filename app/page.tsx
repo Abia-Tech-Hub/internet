@@ -1,5 +1,6 @@
 "use client";
 import React, { useState } from "react";
+import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -91,6 +92,32 @@ export default function BuyInternetPage() {
     setLoginDetails(null);
   };
 
+  // ✅ PAYSTACK CALLBACK (NORMAL FUNCTION, NOT ASYNC)
+const handlePaystackCallback = (response: any) => {
+  console.log("Paystack success:", response);
+
+  fetch(`/api/paystack/verify?reference=${response.reference}`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        toast({
+          title: "Payment Successful",
+          description: "Your internet access is now active",
+        });
+      } else {
+        throw new Error();
+      }
+    })
+    .catch(() => {
+      toast({
+        title: "Verification failed",
+        description: "Please contact support",
+        variant: "destructive",
+      });
+    });
+};
+
+
   const handlePayment = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsProcessing(true);
@@ -125,21 +152,68 @@ export default function BuyInternetPage() {
       });
 
       const initData = await initResponse.json();
+      console.log("Payment init response:", { 
+        status: initResponse.status, 
+        ok: initResponse.ok, 
+        error: initData.error,
+        details: initData.details 
+      });
 
       if (!initResponse.ok) {
+        setIsPaymentOpen(false); // Close modal on initialization failure
+        setIsProcessing(false);
         toast({
           title: "Payment Initialization Failed",
-          description: initData.error || "Please try again.",
+          description: initData.error || initData.details || "Please try again.",
           variant: "destructive",
         });
-        setIsProcessing(false);
         return;
       }
 
+      // Check if public key is available
+      if (!initData.public_key) {
+        setIsPaymentOpen(false); // Close modal on configuration error
+        setIsProcessing(false);
+        toast({
+          title: "Configuration Error",
+          description: "Payment public key is not configured. Please contact support.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Wait for Paystack script to load
+      if (!(window as any).PaystackPop) {
+        // Wait a bit for script to load
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        
+        if (!(window as any).PaystackPop) {
+          setIsPaymentOpen(false); // Close modal on script error
+          setIsProcessing(false);
+          toast({
+            title: "Payment Script Error",
+            description: "Payment script failed to load. Please refresh the page.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
       // Open Paystack payment popup
+      console.log("Setting up Paystack with:", {
+        hasPublicKey: !!initData.public_key,
+        email,
+        amount: parseInt(selectedPlan.price.replace(/[₦,]/g, "")) * 100,
+        reference: initData.reference
+      });
+
       // @ts-ignore - Paystack is loaded via script tag
+      if (typeof (window as any).PaystackPop === 'undefined') {
+        throw new Error("PaystackPop is not available. Please refresh the page.");
+      }
+
       const handler = (window as any).PaystackPop.setup({
-        key: initData.public_key || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "",
+        key: initData.public_key,
         email,
         amount: parseInt(selectedPlan.price.replace(/[₦,]/g, "")) * 100, // Convert to kobo
         ref: initData.reference,
@@ -147,44 +221,53 @@ export default function BuyInternetPage() {
           plan: selectedPlan.name,
           phone: phone || "",
         },
-        callback: async function (response: any) {
-          // Verify payment
-          setIsProcessing(true);
-          try {
-            const verifyResponse = await fetch(
-              `/api/paystack/verify?reference=${response.reference}`
-            );
-            const verifyData = await verifyResponse.json();
+        callback: handlePaystackCallback,
+        // callback: async function (response: any) {
+        //   console.log("Paystack callback:", response);
+        //   // Verify payment
+        //   setIsProcessing(true);
+        //   try {
+        //     const verifyResponse = await fetch(
+        //       `/api/paystack/verify?reference=${response.reference}`
+        //     );
+        //     const verifyData = await verifyResponse.json();
 
-            if (verifyResponse.ok && verifyData.success) {
-              setLoginDetails({
-                username: verifyData.username,
-                password: verifyData.password,
-              });
-              setIsPaymentOpen(true); // Keep modal open to show credentials
-              toast({
-                title: "Payment Successful!",
-                description: "Your internet access has been activated.",
-              });
-            } else {
-              toast({
-                title: "Payment Verification Failed",
-                description: verifyData.error || "Please contact support.",
-                variant: "destructive",
-              });
-            }
-          } catch (error) {
-            toast({
-              title: "Error",
-              description: "Failed to verify payment. Please contact support.",
-              variant: "destructive",
-            });
-          } finally {
-            setIsProcessing(false);
-          }
-        },
+        //     if (verifyResponse.ok && verifyData.success) {
+        //       setLoginDetails({
+        //         username: verifyData.username,
+        //         password: verifyData.password,
+        //       });
+        //       setIsPaymentOpen(true); // Keep modal open to show credentials
+        //       toast({
+        //         title: "Payment Successful!",
+        //         description: "Your internet access has been activated.",
+        //       });
+        //     } else {
+        //       // Close modal on verification failure
+        //       setIsPaymentOpen(false);
+        //       setIsProcessing(false);
+        //       toast({
+        //         title: "Payment Verification Failed",
+        //         description: verifyData.error || "Please contact support.",
+        //         variant: "destructive",
+        //       });
+        //     }
+        //   } catch (error) {
+        //     // Close modal on error
+        //     setIsPaymentOpen(false);
+        //     setIsProcessing(false);
+        //     toast({
+        //       title: "Error",
+        //       description: "Failed to verify payment. Please contact support.",
+        //       variant: "destructive",
+        //     });
+        //   }
+        // },
         onClose: function () {
+          // Reset all states when user closes Paystack popup
           setIsProcessing(false);
+          setIsPaymentOpen(false);
+          setLoginDetails(null);
           toast({
             title: "Payment Cancelled",
             description: "You closed the payment window.",
@@ -192,16 +275,36 @@ export default function BuyInternetPage() {
         },
       });
 
-      handler.openIframe();
-    } catch (error) {
+      try {
+        handler.openIframe();
+        console.log("Paystack iframe opened successfully");
+      } catch (iframeError: any) {
+        console.error("Error opening Paystack iframe:", iframeError);
+        throw new Error(`Failed to open payment window: ${iframeError?.message || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      // Close modal on any unexpected error
+      setIsPaymentOpen(false);
+      setIsProcessing(false);
+      console.error("Payment error:", error);
+      console.error("Error details:", {
+        message: error?.message,
+        stack: error?.stack,
+        name: error?.name,
+      });
+      
+      // Show more specific error message
+      const errorMessage = error?.message || error?.toString() || "Something went wrong. Please try again.";
       toast({
-        title: "Error",
-        description: "Something went wrong. Please try again.",
+        title: "Payment Error",
+        description: errorMessage,
         variant: "destructive",
       });
-      setIsProcessing(false);
     }
   };
+
+
+  
 
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -251,12 +354,15 @@ export default function BuyInternetPage() {
           className="flex items-center gap-2 sm:gap-3"
         >
           <div className="relative">
-            <img
+            <Image
               src="/logowhite.png"
               alt="Abia Tech Hub Logo"
-              className={`h-10 sm:h-12 md:h-14 lg:h-16 transition duration-300 ${
+              width={64}
+              height={64}
+              className={`h-10 sm:h-12 md:h-14 lg:h-16 w-auto transition duration-300 ${
                 isDarkMode ? "logo-glow" : "invert"
               } drop-shadow-lg`}
+              priority
             />
             <div className="absolute inset-0 bg-purple-500/20 blur-xl -z-10 rounded-full"></div>
           </div>
@@ -291,14 +397,26 @@ export default function BuyInternetPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
-            className="text-center mb-8 sm:mb-12"
+            className="text-center mb-6 sm:mb-8"
           >
             <h1 className={`text-2xl sm:text-3xl md:text-4xl font-bold mb-2 ${modeClasses.heading}`}>
               Choose Your Internet Plan
             </h1>
-            <p className={`text-sm sm:text-base ${modeClasses.subtext} max-w-xl mx-auto`}>
+            <p className={`text-sm sm:text-base ${modeClasses.subtext} max-w-xl mx-auto mb-4`}>
               Select a plan and get connected instantly
             </p>
+            {/* Important Notice at Top */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              className={`bg-purple-900/30 border border-purple-700/50 rounded-lg px-4 sm:px-6 py-3 sm:py-4 max-w-2xl mx-auto`}
+            >
+              <p className={`text-xs sm:text-sm ${modeClasses.subtext} text-center`}>
+                After payment, your internet access will be activated automatically.{" "}
+                <span className="text-purple-400 font-semibold">Fast, secure, and reliable.</span>
+              </p>
+            </motion.div>
           </motion.div>
 
           {/* Plans Grid - Mobile Responsive */}
@@ -400,23 +518,61 @@ export default function BuyInternetPage() {
           </motion.div>
         ))}
           </div>
-
-          {/* Footer Note */}
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-            className={`text-xs sm:text-sm mt-8 sm:mt-12 mb-6 sm:mb-8 ${modeClasses.subtext} text-center max-w-2xl mx-auto px-4`}
-          >
-            After payment, your internet access will be activated automatically. 
-            <span className="text-purple-400"> Fast, secure, and reliable.</span>
-          </motion.p>
         </div>
       </main>
 
       {/* Payment Modal */}
-      <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
-        <DialogContent className={`${modeClasses.bg} border-purple-900/50 max-w-md`}>
+      <Dialog 
+        open={isPaymentOpen} 
+        onOpenChange={(open) => {
+          setIsPaymentOpen(open);
+          // Reset all states when modal is closed to prevent UI distortion
+          if (!open) {
+            setIsProcessing(false);
+            setLoginDetails(null);
+            // Force cleanup of any Paystack iframes/overlays that might be stuck
+            setTimeout(() => {
+              const paystackElements = document.querySelectorAll('[id*="paystack"], iframe[src*="paystack"]');
+              paystackElements.forEach(el => {
+                try {
+                  el.remove();
+                } catch (e) {
+                  console.warn("Error removing Paystack element:", e);
+                }
+              });
+              // Remove any stuck overlays
+              const stuckOverlays = document.querySelectorAll('body > div[style*="position: fixed"]');
+              stuckOverlays.forEach(el => {
+                if (el.getAttribute('id')?.includes('paystack') || 
+                    (el as HTMLElement).style.zIndex === '999999') {
+                  try {
+                    el.remove();
+                  } catch (e) {
+                    console.warn("Error removing stuck overlay:", e);
+                  }
+                }
+              });
+            }, 100);
+            // Don't reset selectedPlan here as user might want to try again
+          }
+        }}
+      >
+        <DialogContent 
+          className={`${modeClasses.bg} border-purple-900/50 max-w-md`}
+          onEscapeKeyDown={() => {
+            if (!isProcessing) {
+              setIsPaymentOpen(false);
+              setIsProcessing(false);
+              setLoginDetails(null);
+            }
+          }}
+          onInteractOutside={(e) => {
+            // Prevent closing when clicking outside during processing
+            if (isProcessing) {
+              e.preventDefault();
+            }
+          }}
+        >
           {!loginDetails ? (
             <>
               <DialogHeader>

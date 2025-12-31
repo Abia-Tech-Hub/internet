@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     // Create hotspot user in MikroTik
     try {
       // Use require for CommonJS module
-      const { createHotspotUser } = require("../../../../mikrotik.js");
+      const { createHotspotUser } = require("../../../mikrotik.js");
       await createHotspotUser({
         username,
         password,
