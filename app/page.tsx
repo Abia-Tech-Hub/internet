@@ -2,8 +2,17 @@
 import React, { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Wifi, Clock, Zap, Sun, Moon, LaptopMinimal } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Wifi, Clock, Zap, Sun, Moon, LaptopMinimal, Copy, Check } from "lucide-react";
 import { motion } from "framer-motion";
+import { useToast } from "@/components/ui/use-toast";
 
 // --- Plans Array (Unchanged) ---
 const plans = [
@@ -67,19 +76,153 @@ const plans = [
 export default function BuyInternetPage() {
   // --- 2. State for Dark/Light Mode ---
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const [selectedPlan, setSelectedPlan] = useState<any>(null);
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [loginDetails, setLoginDetails] = useState<{ username: string; password: string } | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const { toast } = useToast();
 
   const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
 
+  const handlePlanSelect = (plan: any) => {
+    setSelectedPlan(plan);
+    setIsPaymentOpen(true);
+    setLoginDetails(null);
+  };
+
+  const handlePayment = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsProcessing(true);
+
+    try {
+      const formData = new FormData(e.currentTarget);
+      const email = formData.get("email") as string;
+      const phone = formData.get("phone") as string;
+
+      if (!email) {
+        toast({
+          title: "Email Required",
+          description: "Please provide your email address for payment.",
+          variant: "destructive",
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      // Initialize Paystack payment
+      const initResponse = await fetch("/api/paystack/initialize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          phone,
+          amount: selectedPlan.price,
+          plan: selectedPlan,
+        }),
+      });
+
+      const initData = await initResponse.json();
+
+      if (!initResponse.ok) {
+        toast({
+          title: "Payment Initialization Failed",
+          description: initData.error || "Please try again.",
+          variant: "destructive",
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      // Open Paystack payment popup
+      // @ts-ignore - Paystack is loaded via script tag
+      const handler = (window as any).PaystackPop.setup({
+        key: initData.public_key || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "",
+        email,
+        amount: parseInt(selectedPlan.price.replace(/[₦,]/g, "")) * 100, // Convert to kobo
+        ref: initData.reference,
+        metadata: {
+          plan: selectedPlan.name,
+          phone: phone || "",
+        },
+        callback: async function (response: any) {
+          // Verify payment
+          setIsProcessing(true);
+          try {
+            const verifyResponse = await fetch(
+              `/api/paystack/verify?reference=${response.reference}`
+            );
+            const verifyData = await verifyResponse.json();
+
+            if (verifyResponse.ok && verifyData.success) {
+              setLoginDetails({
+                username: verifyData.username,
+                password: verifyData.password,
+              });
+              setIsPaymentOpen(true); // Keep modal open to show credentials
+              toast({
+                title: "Payment Successful!",
+                description: "Your internet access has been activated.",
+              });
+            } else {
+              toast({
+                title: "Payment Verification Failed",
+                description: verifyData.error || "Please contact support.",
+                variant: "destructive",
+              });
+            }
+          } catch (error) {
+            toast({
+              title: "Error",
+              description: "Failed to verify payment. Please contact support.",
+              variant: "destructive",
+            });
+          } finally {
+            setIsProcessing(false);
+          }
+        },
+        onClose: function () {
+          setIsProcessing(false);
+          toast({
+            title: "Payment Cancelled",
+            description: "You closed the payment window.",
+          });
+        },
+      });
+
+      handler.openIframe();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+      setIsProcessing(false);
+    }
+  };
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+    toast({
+      title: "Copied!",
+      description: `${field} copied to clipboard`,
+    });
+  };
+
   // --- 3. Dynamic Tailwind Classes based on Mode ---
   const modeClasses = {
-    // Main Container
+    // Main Container - Dark with subtle purple tint
     bg: isDarkMode
-      ? "bg-black text-white"
+      ? "bg-gradient-to-b from-[#0a0a0f] via-[#0f0a1a] to-[#0a0a0f] text-white"
       : "bg-gradient-to-br from-gray-50 to-white text-gray-900",
 
     // Card Background and Border
     card: isDarkMode
-      ? "bg-gray-800/70 border-gray-700 shadow-xl hover:shadow-2xl h-full" // ADDED h-full
+      ? "bg-gray-900/80 border-purple-900/50 shadow-xl hover:shadow-2xl hover:border-purple-700/50 h-full transition-all" // Purple border accents
       : "bg-white border-gray-200 shadow-lg hover:shadow-xl h-full", // ADDED h-full
 
     // Text Colors
@@ -87,66 +230,79 @@ export default function BuyInternetPage() {
     subtext: isDarkMode ? "text-slate-400" : "text-gray-600",
     detailText: isDarkMode ? "text-slate-200" : "text-gray-700",
 
-    // Button Class (Using a primary green accent for better visibility)
-    button: "bg-green-600 hover:bg-green-700 text-white font-semibold",
+    // Button Class (Using purple accent to match theme)
+    button: "bg-purple-600 hover:bg-purple-700 text-white font-semibold border-purple-500",
 
-    // Icon Color (Same as subtext for consistency)
-    iconColor: isDarkMode ? "text-green-400" : "text-green-600",
+    // Icon Color (Purple accent for consistency)
+    iconColor: isDarkMode ? "text-purple-400" : "text-purple-600",
   };
 
   return (
     <div
-      className={`min-h-screen ${modeClasses.bg} flex flex-col items-center px-4 py-10 transition-colors duration-500 font-montserrat`}
+      className={`min-h-screen ${modeClasses.bg} ${isDarkMode ? 'particle-bg' : ''} flex flex-col transition-colors duration-500 font-montserrat`}
     >
-      <div>
-        {/* Using a standard div/img approach since I don't have the image file */}
-        <div
-          className={`h-32 mx-auto transition duration-300 flex items-center justify-center text-3xl font-bold ${
-            isDarkMode ? "text-white" : "text-gray-800"
-          }`}
+      {/* Modern Header Section - Mobile Responsive */}
+      <header className="w-full px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-5 md:py-6 flex items-center justify-between relative z-20 border-b border-purple-900/20">
+        {/* Logo Section */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5 }}
+          className="flex items-center gap-2 sm:gap-3"
         >
-          <img
-            src="/logowhite.png"
-            alt="Abia Tech Hub Logo"
-            className={`h-32 mx-auto transition duration-300 ${
-              isDarkMode ? "" : "invert"
-            }`}
-          />
-        </div>
+          <div className="relative">
+            <img
+              src="/logowhite.png"
+              alt="Abia Tech Hub Logo"
+              className={`h-10 sm:h-12 md:h-14 lg:h-16 transition duration-300 ${
+                isDarkMode ? "logo-glow" : "invert"
+              } drop-shadow-lg`}
+            />
+            <div className="absolute inset-0 bg-purple-500/20 blur-xl -z-10 rounded-full"></div>
+          </div>
+          <div className="hidden sm:block">
+            <h2 className={`text-base sm:text-lg md:text-xl font-bold ${modeClasses.heading}`}>
+              <span className="text-purple-400">Abia</span> Tech Hub
+            </h2>
+            <p className={`text-[10px] sm:text-xs ${modeClasses.subtext}`}>Fast Internet Access</p>
+          </div>
+        </motion.div>
 
-        {/* --- Toggle Button --- */}
+        {/* Toggle Button - Mobile Responsive */}
         <Button
           onClick={toggleDarkMode}
-          className={`absolute top-4 right-4 ${modeClasses.button} px-2.5 rounded-full`}
+          className={`${modeClasses.button} px-2 sm:px-3 py-2 rounded-full shadow-lg hover:scale-110 transition-transform`}
           variant="ghost"
+          size="icon"
         >
           {isDarkMode ? (
-            <Sun className="w-5 h-5" />
+            <Sun className="w-4 h-4 sm:w-5 sm:h-5" />
           ) : (
-            <Moon className="w-5 h-5" />
+            <Moon className="w-4 h-4 sm:w-5 sm:h-5" />
           )}
         </Button>
-      </div>
+      </header>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="text-center mb-12 mt-4"
-      >
-        <h1
-          className={`text-4xl md:text-5xl font-extrabold mb-4 ${modeClasses.heading}`}
-        >
-          <span className="text-green-500">Abia</span> Tech Hub
-        </h1>
-        <p className={`max-w-xl text-sm ${modeClasses.subtext}`}>
-          Fast, reliable internet access powered by Starlink. Choose a plan and
-          get connected instantly.
-        </p>
-      </motion.div>
+      {/* Plans Section - Customer Focused */}
+      <main className="flex-1 w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-12 relative z-10">
+        <div className="w-full max-w-7xl mx-auto">
+          {/* Simple Header */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="text-center mb-8 sm:mb-12"
+          >
+            <h1 className={`text-2xl sm:text-3xl md:text-4xl font-bold mb-2 ${modeClasses.heading}`}>
+              Choose Your Internet Plan
+            </h1>
+            <p className={`text-sm sm:text-base ${modeClasses.subtext} max-w-xl mx-auto`}>
+              Select a plan and get connected instantly
+            </p>
+          </motion.div>
 
-      {/* The grid container forces all columns to be the height of the tallest item */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 w-full max-w-7xl items-stretch px-0 sm:px-12 ">
+          {/* Plans Grid - Mobile Responsive */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8 w-full items-stretch">
         {plans.map((plan, index) => (
           <motion.div
             key={plan.name}
@@ -156,9 +312,9 @@ export default function BuyInternetPage() {
             className="h-full" // Ensure the motion.div takes full height
           >
             <Card
-              className={`${modeClasses.card} rounded-2xl transition duration-300 transform hover:scale-[1.02] shadow-xl h-full`} // Ensure the Card takes full height
+              className={`${modeClasses.card} rounded-xl sm:rounded-2xl transition duration-300 transform hover:scale-[1.02] shadow-xl h-full`} // Ensure the Card takes full height
             >
-              <CardContent className="p-8 flex flex-col gap-6 h-full">
+              <CardContent className="p-4 sm:p-6 lg:p-8 flex flex-col gap-4 sm:gap-6 h-full">
                 {" "}
                 {/* ADDED flex flex-col h-full */}
                 {/* Content Wrapper that takes up all remaining space */}
@@ -168,31 +324,31 @@ export default function BuyInternetPage() {
                   {/* Header Section */}
                   <div>
                     <h2
-                      className={`text-sl md:text-2xl font-bold mb-1 ${modeClasses.heading}`}
+                      className={`text-lg sm:text-xl md:text-2xl font-bold mb-1 ${modeClasses.heading}`}
                     >
                       {plan.name}
                     </h2>
                     <p
-                      className={`${modeClasses.subtext} text-base md:text-sm`}
+                      className={`${modeClasses.subtext} text-xs sm:text-sm md:text-base`}
                     >
                       {plan.description}
                     </p>
                   </div>
                   {/* Price Section */}
-                  <div className="border-b pb-4">
+                  <div className="border-b border-purple-900/30 pb-3 sm:pb-4">
                     <span
-                      className={`text-4xl font-extrabold ${modeClasses.heading}`}
+                      className={`text-3xl sm:text-4xl font-extrabold ${modeClasses.heading}`}
                     >
                       {plan.price}
                     </span>
                     <span
-                      className={`text-xl md:text-base font-medium ml-2 ${modeClasses.subtext}`}
+                      className={`text-sm sm:text-base md:text-lg font-medium ml-2 ${modeClasses.subtext}`}
                     >
-                      {plan.price} / {plan.duration}
+                      / {plan.duration}
                     </span>
                   </div>
                   {/* Features Section */}
-                  <div className="flex flex-col gap-3 md:text-sm ">
+                  <div className="flex flex-col gap-2 sm:gap-3 text-xs sm:text-sm md:text-base">
                     <div
                       className={`flex items-center gap-3 ${modeClasses.detailText}`}
                     >
@@ -234,7 +390,8 @@ export default function BuyInternetPage() {
                 {/* End of flex-grow wrapper */}
                 {/* Button Section - This will be pushed to the bottom */}
                 <Button
-                  className={`${modeClasses.button} w-full py-6 text-lg sm:text-base rounded-xl mt-auto`} // ADDED mt-auto
+                  onClick={() => handlePlanSelect(plan)}
+                  className={`${modeClasses.button} w-full py-4 sm:py-5 lg:py-6 text-sm sm:text-base lg:text-lg rounded-lg sm:rounded-xl mt-auto ${isDarkMode ? 'purple-glow-hover' : ''} transition-all`} // ADDED mt-auto
                 >
                   Get {plan.name}
                 </Button>
@@ -242,11 +399,161 @@ export default function BuyInternetPage() {
             </Card>
           </motion.div>
         ))}
-      </div>
+          </div>
 
-      <p className={`text-sm mt-12 ${modeClasses.subtext}`}>
-        After payment, your internet access will be activated automatically.
-      </p>
+          {/* Footer Note */}
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            className={`text-xs sm:text-sm mt-8 sm:mt-12 mb-6 sm:mb-8 ${modeClasses.subtext} text-center max-w-2xl mx-auto px-4`}
+          >
+            After payment, your internet access will be activated automatically. 
+            <span className="text-purple-400"> Fast, secure, and reliable.</span>
+          </motion.p>
+        </div>
+      </main>
+
+      {/* Payment Modal */}
+      <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
+        <DialogContent className={`${modeClasses.bg} border-purple-900/50 max-w-md`}>
+          {!loginDetails ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className={modeClasses.heading}>
+                  Complete Payment - {selectedPlan?.name}
+                </DialogTitle>
+                <DialogDescription className={modeClasses.subtext}>
+                  Amount: <span className="text-purple-400 font-bold">{selectedPlan?.price}</span>
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handlePayment} className="space-y-4">
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${modeClasses.heading}`}>
+                    Phone Number
+                  </label>
+                  <input
+                    type="tel"
+                    name="phone"
+                    required
+                    className={`w-full px-3 py-2 rounded-lg border ${isDarkMode ? 'bg-gray-800 border-purple-900/50 text-white' : 'bg-white border-gray-300 text-gray-900'} focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                    placeholder="08012345678"
+                  />
+                </div>
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${modeClasses.heading}`}>
+                    Email <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    name="email"
+                    required
+                    className={`w-full px-3 py-2 rounded-lg border ${isDarkMode ? 'bg-gray-800 border-purple-900/50 text-white' : 'bg-white border-gray-300 text-gray-900'} focus:outline-none focus:ring-2 focus:ring-purple-500`}
+                    placeholder="your@email.com"
+                  />
+                  <p className={`text-xs mt-1 ${modeClasses.subtext}`}>
+                    Required for payment receipt
+                  </p>
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsPaymentOpen(false)}
+                    className="border-purple-500 text-purple-400"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isProcessing}
+                    className={modeClasses.button}
+                  >
+                    {isProcessing ? "Processing..." : "Pay Now"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle className={`${modeClasses.heading} text-green-400`}>
+                  Payment Successful! 🎉
+                </DialogTitle>
+                <DialogDescription className={modeClasses.subtext}>
+                  Your internet access has been activated. Use these credentials to connect:
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${modeClasses.subtext}`}>
+                    Username
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={loginDetails.username}
+                      readOnly
+                      className={`flex-1 px-3 py-2 rounded-lg border ${isDarkMode ? 'bg-gray-800 border-purple-900/50 text-white' : 'bg-gray-100 border-gray-300 text-gray-900'} font-mono`}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => copyToClipboard(loginDetails.username, "Username")}
+                      className="border-purple-500"
+                    >
+                      {copiedField === "Username" ? (
+                        <Check className="h-4 w-4 text-green-400" />
+                      ) : (
+                        <Copy className="h-4 w-4 text-purple-400" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${modeClasses.subtext}`}>
+                    Password
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={loginDetails.password}
+                      readOnly
+                      className={`flex-1 px-3 py-2 rounded-lg border ${isDarkMode ? 'bg-gray-800 border-purple-900/50 text-white' : 'bg-gray-100 border-gray-300 text-gray-900'} font-mono`}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => copyToClipboard(loginDetails.password, "Password")}
+                      className="border-purple-500"
+                    >
+                      {copiedField === "Password" ? (
+                        <Check className="h-4 w-4 text-green-400" />
+                      ) : (
+                        <Copy className="h-4 w-4 text-purple-400" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    onClick={() => {
+                      setIsPaymentOpen(false);
+                      setLoginDetails(null);
+                      setSelectedPlan(null);
+                    }}
+                    className={modeClasses.button}
+                  >
+                    Done
+                  </Button>
+                </DialogFooter>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
