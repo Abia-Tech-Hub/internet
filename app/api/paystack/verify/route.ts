@@ -1,6 +1,7 @@
+// app/api/paystack/verify/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-// Plan to MikroTik profile mapping
+// Plan → MikroTik profile mapping
 const planProfiles: Record<string, string> = {
   "Quick Surf": "2hour",
   "Daily Access": "24hour",
@@ -11,77 +12,106 @@ const planProfiles: Record<string, string> = {
 };
 
 export async function GET(request: NextRequest) {
+  const debug: Record<string, any> = {}; // collect info for debugging
+
+  // --- Step 0: Dynamically import MikroTik (server-only) ---
+  let createHotspotUser: any;
+  try {
+    const mikrotikModule = await import("../../../../mikrotik.js");
+    createHotspotUser = mikrotikModule.createHotspotUser;
+    debug.mikrotikImport = true;
+  } catch (err: any) {
+    debug.mikrotikImportError = err.message;
+    console.error("MikroTik import failed:", err);
+    return NextResponse.json(
+      { error: "Server failed to import MikroTik module", debug },
+      { status: 500 }
+    );
+  }
+
   try {
     const searchParams = request.nextUrl.searchParams;
     const reference = searchParams.get("reference");
+    debug.reference = reference;
 
     if (!reference) {
       return NextResponse.json(
-        { error: "Reference is required" },
+        { error: "Reference is required", debug },
         { status: 400 }
       );
     }
 
-    // Verify payment with Paystack
-    const paystackResponse = await fetch(
-      `https://api.paystack.co/transaction/verify/${reference}`,
-      {
+    // --- Step 1: Verify payment with Paystack ---
+    let paystackData;
+    try {
+      const res = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        },
-      }
-    );
-
-    const paystackData = await paystackResponse.json();
-
-    if (!paystackResponse.ok || paystackData.status !== true) {
+        headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` },
+      });
+      paystackData = await res.json();
+      debug.paystackStatus = res.status;
+      debug.paystackData = paystackData;
+    } catch (err: any) {
+      debug.paystackError = err.message;
+      console.error("Paystack verification failed:", err);
       return NextResponse.json(
-        { error: "Payment verification failed", details: paystackData.message },
+        { error: "Failed to verify payment with Paystack", debug },
+        { status: 500 }
+      );
+    }
+
+    if (!paystackData?.status) {
+      return NextResponse.json(
+        { error: "Payment verification failed", debug },
         { status: 400 }
       );
     }
 
     const transaction = paystackData.data;
-    
-    // Check if payment was successful
+    debug.transactionStatus = transaction.status;
+
     if (transaction.status !== "success") {
       return NextResponse.json(
-        { error: "Payment not successful", status: transaction.status },
+        { error: "Payment not successful", status: transaction.status, debug },
         { status: 400 }
       );
     }
 
-    // Get plan from metadata
-    const planName = transaction.metadata?.plan || transaction.metadata?.custom_fields?.find((f: any) => f.variable_name === "plan")?.value;
-    const phone = transaction.metadata?.phone || transaction.metadata?.custom_fields?.find((f: any) => f.variable_name === "phone")?.value;
+    // --- Step 2: Extract plan and phone ---
+    const planName =
+      transaction.metadata?.plan ||
+      transaction.metadata?.custom_fields?.find((f: any) => f.variable_name === "plan")?.value;
+    const phone =
+      transaction.metadata?.phone ||
+      transaction.metadata?.custom_fields?.find((f: any) => f.variable_name === "phone")?.value;
+
+    debug.planName = planName;
+    debug.phone = phone;
 
     if (!planName) {
       return NextResponse.json(
-        { error: "Plan information not found in transaction" },
+        { error: "Plan info missing in transaction", debug },
         { status: 400 }
       );
     }
 
-    // Generate username and password
-    const username = `user_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const password = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10).toUpperCase() + "123";
+    // --- Step 3: Generate username/password ---
+    const username = `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const password =
+      Math.random().toString(36).substring(2, 10) +
+      Math.random().toString(36).substring(2, 10).toUpperCase() +
+      "123";
 
-    // Get MikroTik profile for the plan
     const profile = planProfiles[planName] || "default";
+    debug.generatedUsername = username;
+    debug.generatedProfile = profile;
 
-    // Create hotspot user in MikroTik
+    // --- Step 4: Create MikroTik user ---
     try {
-      const { createHotspotUser } = require("../../../../mikrotik.js");
-      await createHotspotUser({
-        username,
-        password,
-        profile,
-      });
-
-      // Here you would typically:
-      // 1. Save payment record to database with reference, username, password, etc.
-      // 2. Send confirmation email if email provided
+      console.log("Connecting to MikroTik and creating user...");
+      await createHotspotUser({ username, password, profile });
+      debug.mikrotikSuccess = true;
+      console.log("MikroTik user created:", username);
 
       return NextResponse.json({
         success: true,
@@ -89,23 +119,22 @@ export async function GET(request: NextRequest) {
         password,
         reference: transaction.reference,
         message: "Payment verified and user created successfully",
+        debug,
       });
-    } catch (mikrotikError: any) {
-      console.error("MikroTik error:", mikrotikError);
+    } catch (mikrotikErr: any) {
+      debug.mikrotikError = mikrotikErr.message;
+      console.error("MikroTik error:", mikrotikErr);
       return NextResponse.json(
-        {
-          error: "Failed to create user account. Please contact support.",
-          details: mikrotikError.message,
-        },
+        { error: "Failed to create MikroTik user", details: mikrotikErr.message, debug },
         { status: 500 }
       );
     }
-  } catch (error: any) {
-    console.error("Payment verification error:", error);
+  } catch (err: any) {
+    debug.unexpectedError = err.message;
+    console.error("Unexpected error:", err);
     return NextResponse.json(
-      { error: "Payment verification failed", details: error.message },
+      { error: "Payment verification process failed", debug },
       { status: 500 }
     );
   }
 }
-

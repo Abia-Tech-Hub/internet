@@ -212,6 +212,13 @@ const handlePaystackCallback = (response: any) => {
         throw new Error("PaystackPop is not available. Please refresh the page.");
       }
 
+      // Close modal before Paystack opens
+      setIsPaymentOpen(false);
+
+      // Reset form/button state immediately
+      setIsProcessing(false);
+
+
       const handler = (window as any).PaystackPop.setup({
         key: initData.public_key,
         email,
@@ -222,47 +229,7 @@ const handlePaystackCallback = (response: any) => {
           phone: phone || "",
         },
         callback: handlePaystackCallback,
-        // callback: async function (response: any) {
-        //   console.log("Paystack callback:", response);
-        //   // Verify payment
-        //   setIsProcessing(true);
-        //   try {
-        //     const verifyResponse = await fetch(
-        //       `/api/paystack/verify?reference=${response.reference}`
-        //     );
-        //     const verifyData = await verifyResponse.json();
-
-        //     if (verifyResponse.ok && verifyData.success) {
-        //       setLoginDetails({
-        //         username: verifyData.username,
-        //         password: verifyData.password,
-        //       });
-        //       setIsPaymentOpen(true); // Keep modal open to show credentials
-        //       toast({
-        //         title: "Payment Successful!",
-        //         description: "Your internet access has been activated.",
-        //       });
-        //     } else {
-        //       // Close modal on verification failure
-        //       setIsPaymentOpen(false);
-        //       setIsProcessing(false);
-        //       toast({
-        //         title: "Payment Verification Failed",
-        //         description: verifyData.error || "Please contact support.",
-        //         variant: "destructive",
-        //       });
-        //     }
-        //   } catch (error) {
-        //     // Close modal on error
-        //     setIsPaymentOpen(false);
-        //     setIsProcessing(false);
-        //     toast({
-        //       title: "Error",
-        //       description: "Failed to verify payment. Please contact support.",
-        //       variant: "destructive",
-        //     });
-        //   }
-        // },
+        
         onClose: function () {
           // Reset all states when user closes Paystack popup
           setIsProcessing(false);
@@ -530,29 +497,7 @@ const handlePaystackCallback = (response: any) => {
           if (!open) {
             setIsProcessing(false);
             setLoginDetails(null);
-            // Force cleanup of any Paystack iframes/overlays that might be stuck
-            setTimeout(() => {
-              const paystackElements = document.querySelectorAll('[id*="paystack"], iframe[src*="paystack"]');
-              paystackElements.forEach(el => {
-                try {
-                  el.remove();
-                } catch (e) {
-                  console.warn("Error removing Paystack element:", e);
-                }
-              });
-              // Remove any stuck overlays
-              const stuckOverlays = document.querySelectorAll('body > div[style*="position: fixed"]');
-              stuckOverlays.forEach(el => {
-                if (el.getAttribute('id')?.includes('paystack') || 
-                    (el as HTMLElement).style.zIndex === '999999') {
-                  try {
-                    el.remove();
-                  } catch (e) {
-                    console.warn("Error removing stuck overlay:", e);
-                  }
-                }
-              });
-            }, 100);
+            
             // Don't reset selectedPlan here as user might want to try again
           }
         }}
