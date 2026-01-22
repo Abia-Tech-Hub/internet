@@ -1,0 +1,57 @@
+export const plans = [
+  {
+    name: "Quick Surf",
+    price: "₦200",
+    duration: "2 Hour",
+    speed: "20 Mbps",
+    rate: "₦200/hr",
+    cap: 25,
+    devices: 1,
+    description: "Perfect for quick checks and basic browsing.",
+  },
+  {
+    name: "Daily Access",
+    price: "₦350",
+    duration: "24 Hours",
+    speed: "20 Mbps",
+    description: "All-day access for work, streaming, and socializing.",
+    cap: 50,
+    devices: 1,
+  },
+  {
+    name: "Daily Access II",
+    price: "₦500",
+    duration: "24 Hours",
+    speed: "25 Mbps",
+    description: "All-day access for work, streaming, and socializing.",
+    cap: "unlimited",
+    devices: 2,
+  },
+  {
+    name: "Weekly Connect", // New Weekly Plan
+    price: "₦1,500",
+    duration: "7 Days",
+    speed: "30 Mbps",
+    description: "Reliable connection for your full work week.",
+    cap: "unlimited",
+    devices: 2,
+  },
+  {
+    name: "Power User",
+    price: "₦1,000",
+    duration: "1 Day",
+    speed: "50 Mbps",
+    description: "High-speed for heavy downloads and gaming.",
+    cap: "unlimited",
+    devices: 4,
+  },
+  {
+    name: "Monthly Pro", // New Monthly Plan (optional, but good for range)
+    price: "₦10,000",
+    duration: "30 Days",
+    speed: "100 Mbps",
+    description: "The ultimate package for consistent high performance.",
+    cap: "unlimited",
+    devices: 2,
+  },
+];
